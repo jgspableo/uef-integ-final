@@ -2,91 +2,141 @@ import express from "express";
 import { jwtVerify, createRemoteJWKSet } from "jose";
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
+
+// Fix for __dirname in ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = Number(process.env.PORT || 10000);
 
-// Configuration
+// ==========================================
+// 1. CONFIGURATION
+// ==========================================
 const CONFIG = {
-  clientId: "b00d7797-a2f2-4e2f-9159-0056cc3b7da7", // From Blackboard Dev Portal
+  // Your Application ID from the screenshot
+  clientId: "b00d7797-a2f2-4e2f-9159-0056cc3b7da7",
+
+  // Your specific Blackboard OIDC endpoint (Bypassing the global gateway)
+  oidcAuthUrl:
+    "https://mapua-test.blackboard.com/learn/api/public/v1/lti/oidc/auth",
+
+  // Blackboard's public keys
+  jwksUrl: "https://developer.anthology.com/api/v1/jwks/bb-blearn-1004.json",
+
+  // The Issuer (always blackboard.com for LTI 1.3)
   iss: "https://blackboard.com",
-  jwksUrl: "https://developer.anthology.com/api/v1/jwks/bb-blearn-1004.json", // Public keys from Blackboard
-  restToken: "lp2DFoWoxsVjmOrCHkMVK5Nou3Ra4DLf", // In prod, swap this for real 3LO
+
+  // Your hardcoded token for now (Implement real 3LO later)
+  restToken: "1p2DFoWoxsVjmOrCHKmMVK5Nou3Ra4DLf",
 };
 
+// Middleware to handle form data (LTI Launches are Form POSTs)
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// Serve static files (public/jwks.json, widget-wrapper.html, etc.)
 app.use(express.static("public"));
 
-// Security Headers [cite: 389, 390]
+// ==========================================
+// 2. SECURITY HEADERS
+// ==========================================
 app.use((req, res, next) => {
-  res.setHeader("Content-Security-Policy", "frame-ancestors https://*.blackboard.com https://*.blackboardcloud.com;");
-  res.setHeader("X-Frame-Options", "ALLOW-FROM https://blackboard.com");
+  // Allow Blackboard to frame your app
+  res.setHeader(
+    "Content-Security-Policy",
+    "frame-ancestors https://*.blackboard.com https://*.blackboardcloud.com;"
+  );
   next();
 });
 
-// 1. JWKS Endpoint (Required for LTI) [cite: 73]
+// ==========================================
+// 3. ROUTES
+// ==========================================
+
+// JWKS Endpoint - Required by Blackboard to verify YOUR messages
 app.get("/.well-known/jwks.json", (req, res) => {
-  const jwks = fs.readFileSync(path.join(process.cwd(), "public/jwks.json"), "utf-8");
-  res.type("json").send(jwks);
+  const jwksPath = path.join(__dirname, "public", "jwks.json");
+  if (fs.existsSync(jwksPath)) {
+    res.type("json").send(fs.readFileSync(jwksPath, "utf-8"));
+  } else {
+    res.status(500).json({ error: "jwks.json not found in /public" });
+  }
 });
 
-// 2. OIDC Login Route [cite: 143]
+// LTI 1.3 OIDC Login Endpoint
 app.get("/login", (req, res) => {
-  const { iss, login_hint, target_link_uri } = req.query;
-  const state = "random_state_string"; // In prod, use crypto.randomUUID()
-  const nonce = "random_nonce_string"; 
-  
-  // Construct redirect to Blackboard's Auth Endpoint
-  const authUrl = new URL("https://developer.anthology.com/api/v1/gateway/oidc/auth");
+  const { login_hint, target_link_uri } = req.query;
+
+  if (!login_hint) {
+    return res.status(400).send("Missing login_hint");
+  }
+
+  // Construct the redirect URL to YOUR Blackboard instance
+  const authUrl = new URL(CONFIG.oidcAuthUrl);
   authUrl.searchParams.append("response_type", "id_token");
   authUrl.searchParams.append("scope", "openid");
   authUrl.searchParams.append("login_hint", login_hint);
   authUrl.searchParams.append("client_id", CONFIG.clientId);
-  authUrl.searchParams.append("redirect_uri", target_link_uri); // Should point to /launch
-  authUrl.searchParams.append("state", state);
-  authUrl.searchParams.append("nonce", nonce);
+  authUrl.searchParams.append("redirect_uri", target_link_uri);
+  authUrl.searchParams.append("state", "random_state_string"); // In prod, use a unique UUID
+  authUrl.searchParams.append("nonce", "random_nonce_string");
 
+  console.log(`[OIDC] Redirecting to: ${authUrl.toString()}`);
   res.redirect(authUrl.toString());
 });
 
-// 3. LTI Launch Route [cite: 150, 151]
+// LTI 1.3 Launch Endpoint
 app.post("/launch", async (req, res) => {
-  const {Tk, state} = req.body;
-  
+  const { id_token } = req.body;
+
+  if (!id_token) {
+    return res.status(400).send("Missing id_token");
+  }
+
   try {
-    // Verify Token (Simplified) [cite: 154, 157]
+    // Verify the token sent by Blackboard
     const JWKS = createRemoteJWKSet(new URL(CONFIG.jwksUrl));
     const { payload } = await jwtVerify(id_token, JWKS, {
       issuer: CONFIG.iss,
       audience: CONFIG.clientId,
     });
 
-    const contextId = payload["https://purl.imsglobal.org/spec/lti/claim/context"]?.id;
+    console.log("[LTI] Launch successful for user:", payload.sub);
+
+    // Extract Context Data
+    const contextClaim =
+      payload["https://purl.imsglobal.org/spec/lti/claim/context"] || {};
+    const contextId = contextClaim.id || "unknown_course";
     const userId = payload.sub;
 
-    // Render the Bridge HTML [cite: 171, 182]
+    // Return the Bridge HTML
+    // This runs inside the hidden iframe and starts the UEF handshake
     res.send(`
       <!DOCTYPE html>
       <html lang="en">
       <head>
-        <title>NoodleFactory UEF Bridge</title>
-        <script src="/uef-integration.js"></script>
+        <meta charset="UTF-8">
+        <title>UEF Bridge</title>
         <script>
-          // Inject configuration for the frontend bridge
+          // Inject configuration for the frontend script
           window.UEF_CONFIG = {
             restToken: "${CONFIG.restToken}",
             userId: "${userId}",
             courseId: "${contextId}"
           };
         </script>
+        <script src="/uef-integration.js"></script>
       </head>
-      <body></body>
+      <body>
+        <h1>UEF Bridge Loaded</h1>
+      </body>
       </html>
     `);
   } catch (error) {
-    console.error("Launch Error:", error);
-    res.status(401).send("Unauthorized LTI Launch");
+    console.error("[LTI] Verification Failed:", error.message);
+    res.status(401).send("Unauthorized: " + error.message);
   }
 });
 
