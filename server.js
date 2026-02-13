@@ -19,7 +19,6 @@ const REST_KEY = must("REST_KEY");
 const REST_SECRET = must("REST_SECRET");
 
 const PORTAL_TITLE = process.env.PORTAL_TITLE || "NoodleFactory Chat";
-const NF_WIDGET_SRC = must("NF_WIDGET_SRC");
 
 // --- Security headers: allow Learn to iframe your tool ---
 app.use((req, res, next) => {
@@ -44,6 +43,46 @@ app.get("/jwks.json", (req, res) => {
       .json({ error: "jwks.json not found. Run: npm run gen:jwks" });
   }
   res.sendFile(jwksPath);
+});
+
+app.get("/login", (req, res) => {
+  const { iss, login_hint, target_link_uri, lti_message_hint } = req.query;
+
+  if (!PLATFORM_OIDC_AUTH_ENDPOINT || !CLIENT_ID) {
+    return res
+      .status(500)
+      .send("Missing PLATFORM_OIDC_AUTH_ENDPOINT or CLIENT_ID env vars.");
+  }
+
+  if (!iss || !login_hint || !target_link_uri) {
+    return res
+      .status(400)
+      .send("Missing required OIDC login initiation params.");
+  }
+
+  // Create state + nonce
+  const state = crypto.randomBytes(16).toString("hex");
+  const nonce = crypto.randomBytes(16).toString("hex");
+
+  stateStore.set(state, { nonce, iss, target_link_uri });
+
+  // IMPORTANT: login_hint and lti_message_hint must be forwarded unaltered :contentReference[oaicite:4]{index=4}
+  const params = new URLSearchParams({
+    scope: "openid",
+    response_type: "id_token",
+    response_mode: "form_post",
+    prompt: "none",
+    client_id: CLIENT_ID,
+    redirect_uri: REDIRECT_URI,
+    state,
+    nonce,
+    login_hint,
+  });
+
+  if (lti_message_hint) params.set("lti_message_hint", lti_message_hint);
+
+  // Redirect to Learn’s OIDC auth request endpoint :contentReference[oaicite:5]{index=5}
+  return res.redirect(`${PLATFORM_OIDC_AUTH_ENDPOINT}?${params.toString()}`);
 });
 
 /**
