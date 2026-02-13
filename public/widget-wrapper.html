@@ -1,22 +1,139 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>NF Widget Wrapper Test</title>
+    <title>NF Widget Wrapper</title>
+
     <style>
-      html, body { height: 100%; margin: 0; }
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-      .hint { padding: 16px; }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+      }
+
+      /* Use viewport units so "fixed" positioning behaves predictably inside the iframe */
+      body {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial,
+          sans-serif;
+      }
+
+      #nf-root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+      }
+
+      #nf-status {
+        position: absolute;
+        left: 12px;
+        top: 12px;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(0, 0, 0, 0.06);
+        font-size: 12px;
+        line-height: 1.35;
+        max-width: calc(100% - 24px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     </style>
   </head>
+
   <body>
-    <div class="hint">
-      <h3>Widget wrapper test</h3>
-      <p>If your NF widget loads here, the script is valid. The UEF loader should then inject the same widget inside Blackboard Ultra.</p>
+    <div id="nf-root">
+      <div id="nf-status">Loading NF widget…</div>
     </div>
 
-    <!-- Load the same /uef.js your UEF will load -->
-    <script src="/uef.js"></script>
+    <script>
+      (function () {
+        const statusEl = document.getElementById("nf-status");
+        const setStatus = (s) => {
+          if (statusEl) statusEl.textContent = s;
+        };
+
+        // Re-pin the floating button if it was positioned while the iframe was 0×0
+        function fixPinnedButton() {
+          const btn =
+            document.querySelector(".noodle-factory-button-wrapper") ||
+            document.querySelector(".noodle-factory-button");
+
+          if (!btn) return;
+
+          btn.style.position = "fixed";
+          btn.style.right = "16px";
+          btn.style.bottom = "16px";
+          btn.style.left = "auto";
+          btn.style.top = "auto";
+          btn.style.transform = "none";
+          btn.style.zIndex = "2147483000";
+
+          // If the widget wrapper container is clipping, unclip it
+          const wrapper = document.querySelector(
+            ".noodle-factory-widget-wrapper"
+          );
+          if (wrapper) {
+            wrapper.style.overflow = "visible";
+            wrapper.style.position = "fixed";
+            wrapper.style.right = "0";
+            wrapper.style.bottom = "0";
+            wrapper.style.left = "0";
+            wrapper.style.top = "0";
+            wrapper.style.zIndex = "2147483000";
+          }
+        }
+
+        // Watch for widget DOM insertion
+        const mo = new MutationObserver(() => {
+          const hasWidget =
+            !!document.querySelector(".noodle-factory-widget-wrapper") ||
+            !!document.querySelector(".noodle-factory-button-wrapper");
+
+          if (hasWidget) {
+            setStatus("NF widget detected ✅");
+            // Let layout settle, then pin
+            setTimeout(() => {
+              fixPinnedButton();
+              // Some widgets only reposition on resize
+              window.dispatchEvent(new Event("resize"));
+            }, 50);
+          }
+        });
+
+        mo.observe(document.documentElement, {
+          childList: true,
+          subtree: true,
+        });
+
+        // Also pin on resize
+        window.addEventListener("resize", () =>
+          setTimeout(fixPinnedButton, 50)
+        );
+
+        // Expose a manual debug helper
+        window.__nfDebug = () => ({
+          vw: document.documentElement.clientWidth,
+          vh: document.documentElement.clientHeight,
+          hasWrapper: !!document.querySelector(
+            ".noodle-factory-widget-wrapper"
+          ),
+          hasButton: !!document.querySelector(".noodle-factory-button-wrapper"),
+        });
+
+        setStatus("Waiting for NF widget DOM…");
+      })();
+    </script>
+
+    <!-- Load the NF widget SDK (IMPORTANT: NOT /uef.js) -->
+    <!-- Replace the URL below with your actual widget-sdk URL -->
+    <script
+      src="https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js"
+      defer
+    ></script>
   </body>
 </html>
