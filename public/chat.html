@@ -18,29 +18,25 @@
     </style>
   </head>
   <body>
-    <script>
-      // Optional: you can hardcode here, or inject similarly.
-      const NF_WIDGET_SRC = "%%NF_WIDGET_SRC%%";
-    </script>
-
+    <!--Start of NoodleFactory.ai Widget Script-->
     <script type="text/javascript">
-      var $_Widget = $_Widget || {};
-      $_NFW = $_NFW || {};
+      var $_Widget = $_Widget || {},
+        $_NFW = $_NFW || {};
       (function () {
         var s1 = document.createElement("script"),
           s0 = document.getElementsByTagName("script")[0];
         s1.async = true;
-        s1.src = NF_WIDGET_SRC || "https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js";
+        s1.src =
+          "https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js";
         s1.charset = "UTF-8";
-        s1.setAttribute("crossorigin", "anonymous");
+        s1.setAttribute("crossorigin", "*");
         s1.setAttribute("id", "sw-widget");
         s1.onload = function () {
-          if (window.$_NFW && typeof $_NFW.initialize === "function") {
-            $_NFW.initialize();
-          }
+          $_NFW.initialize();
         };
         s0.parentNode.insertBefore(s1, s0);
       })();
     </script>
+    <!--End of NoodleFactory.ai Widget Script-->
   </body>
 </html>
