@@ -7,6 +7,9 @@
 <body>
     <script>
         // 1. Handshake with Blackboard
+        var myOrigin = window.location.origin; 
+        
+        console.log("🚀 UEF Controller Loaded. Sending Hello...");
         window.parent.postMessage({ type: "integration:hello" }, "*");
 
         // 2. Wait for Authorization
@@ -14,21 +17,22 @@
             var data = event.data;
 
             if (data.type === "integration:authorize") {
-                console.log("✅ UEF Authorized. Attempting to open panel...");
+                console.log("✅ UEF Authorized! Registering Help Item...");
 
-                // 3. Command Blackboard to Open the Panel
-                // We point the panel URL to your new chat.html file
-                var panelCommand = {
-                    type: "integration:panel:open",
+                // 3. Register a Help Item (The reliable way)
+                // This adds a link to the Blackboard Help Menu (?)
+                var registerHelpCommand = {
+                    type: "integration:help:register",
                     payload: {
-                        type: "custom_panel",
-                        url: "https://uef-integ-final.onrender.com/chat.html", 
-                        title: "NoodleFactory AI",
-                        width: "small" // Options: small, medium, large
+                        id: "noodle-factory-chat",
+                        title: "Chat with NoodleFactory AI", // Text in the menu
+                        url: "https://uef-integ-final.onrender.com/chat.html", // Opens the visible chat
+                        icon: "https://uef-integ-final.onrender.com/icon.png" // Optional
                     }
                 };
 
-                window.parent.postMessage(panelCommand, "*");
+                window.parent.postMessage(registerHelpCommand, "*");
+                console.log("📩 Help Item Registered. Check the '?' menu!");
             }
         });
     </script>
