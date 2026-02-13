@@ -19,11 +19,10 @@ const CONFIG = {
   clientId: "b00d7797-a2f2-4e2f-9159-0056cc3b7da7",
 
   // Your specific Blackboard OIDC endpoint (Bypassing the global gateway)
-  oidcAuthUrl:
-    "https://mapua-test.blackboard.com/learn/api/public/v1/lti/oidc/auth",
+  oidcAuthUrl: "https://developer.blackboard.com/api/v1/gateway/oidcauth",
 
   // Blackboard's public keys
-  jwksUrl: "https://developer.anthology.com/api/v1/jwks/bb-blearn-1004.json",
+  jwksUrl: "https://developer.blackboard.com/keys/jwks ",
 
   // The Issuer (always blackboard.com for LTI 1.3)
   iss: "https://blackboard.com",
