@@ -2,113 +2,236 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>UEF Bootstrap</title>
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,maximum-scale=1"
+    />
+    <title>UEF Launcher</title>
+    <style>
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        margin: 16px;
+      }
+      .muted {
+        opacity: 0.7;
+        font-size: 12px;
+      }
+      pre {
+        background: #111;
+        color: #0f0;
+        padding: 12px;
+        border-radius: 10px;
+        overflow: auto;
+        max-height: 45vh;
+      }
+      .ok {
+        color: #0a0;
+        font-weight: 700;
+      }
+      .warn {
+        color: #b58900;
+        font-weight: 700;
+      }
+      .err {
+        color: #c00;
+        font-weight: 700;
+      }
+    </style>
   </head>
+
   <body>
+    <h2>UEF bootstrap loaded</h2>
+    <div class="muted">
+      This page should be launched from Learn (inside an iframe). If you open it
+      directly, UEF messages won’t connect.
+    </div>
+
+    <pre id="log"></pre>
+
     <script>
-      // Injected by server.js
-      const LEARN_HOST = "%%LEARN_HOST%%";
-      const REST_TOKEN = "%%REST_TOKEN%%";
-      const TOOL_BASE_URL = "%%TOOL_BASE_URL%%";
-      const PORTAL_TITLE = "%%PORTAL_TITLE%%";
+      /************************************************************
+       * Injected by server.js via %%VAR%% replacement
+       ************************************************************/
+      const LEARN_HOST = "%%LEARN_HOST%%"; // e.g. https://mapua-test.blackboard.com
+      const REST_TOKEN = "%%REST_TOKEN%%"; // bearer token your server got
+      const TOOL_BASE_URL = "%%TOOL_BASE_URL%%"; // e.g. https://uef-integ-final.onrender.com
+      const PORTAL_TITLE = "%%PORTAL_TITLE%%"; // display label
 
-      console.log("UEF bootstrap loaded");
+      /************************************************************
+       * YOU MUST SET THIS:
+       * Use the Placement "Handle" from Admin -> LTI Tool Providers -> Manage Placements
+       * Pick the placement that renders your widget (Course content tool / Course navigation tool).
+       ************************************************************/
+      const LTI_PLACEMENT_HANDLE = "%%LTI_PLACEMENT_HANDLE%%"; // <-- set/inject this
 
-      // 1) Ask Ultra for a MessagePort (MessageChannel)
-      function requestPort() {
-        window.parent.postMessage(
-          { type: "integration:hello" },
-          LEARN_HOST
-        );
+      // Optional IDs (stable strings)
+      const HELP_ID = "nf-help";
+      const COURSE_DETAIL_ID = "nf-mappy-widget";
+
+      /************************************************************
+       * Logger
+       ************************************************************/
+      const $log = document.getElementById("log");
+      function log(...args) {
+        const line = args
+          .map((a) => (typeof a === "string" ? a : JSON.stringify(a, null, 2)))
+          .join(" ");
+        $log.textContent += line + "\n";
+        console.log(...args);
       }
 
-      let port = null;
+      /************************************************************
+       * UEF MessagePort handshake (MessageChannel)
+       *
+       * Anthology docs show this “integration-hello” pattern for obtaining a port.
+       * In practice, some installs respond to integration:hello-style echoes too,
+       * so we accept either.
+       ************************************************************/
+      function acquireMessagePort() {
+        return new Promise((resolve, reject) => {
+          let resolved = false;
 
-      window.addEventListener("message", (event) => {
-        // Only accept from the Learn host
-        if (event.origin !== LEARN_HOST) return;
+          // 1) Create channel we will hand to Learn
+          const channel = new MessageChannel();
 
-        // Ultra will respond with a MessagePort in event.ports[0]
-        if (event.ports && event.ports.length > 0) {
-          port = event.ports[0];
-          console.log("✅ UEF MessagePort acquired");
+          // 2) If Learn responds on our port, we are connected
+          channel.port1.onmessage = (event) => {
+            const data = event.data || {};
+            // Some systems echo a message back; even without it, port being active is enough.
+            if (!resolved) {
+              resolved = true;
+              log("✅ UEF MessagePort acquired");
+              resolve(channel.port1);
+            }
+          };
 
-          port.onmessage = onPortMessage;
+          // 3) Keep knocking until Learn binds the port
+          let attempt = 0;
+          const timer = setInterval(() => {
+            attempt++;
+            if (attempt === 1 || attempt % 5 === 0) {
+              log(`👋 Knocking... (Attempt ${attempt})`);
+            }
 
-          authorizeAndRegister();
-        }
-      });
+            try {
+              // Docs use type: "integration-hello" with port2 transferred
+              // We'll do that. (Some instances also accept "integration:hello".)
+              window.parent.postMessage(
+                { type: "integration-hello" },
+                LEARN_HOST,
+                [channel.port2]
+              );
+            } catch (e) {
+              // If target origin mismatch causes issues, try wildcard as last resort
+              try {
+                window.parent.postMessage(
+                  { type: "integration-hello" },
+                  "*",
+                  [channel.port2]
+                );
+              } catch (e2) {
+                // ignore
+              }
+            }
 
-      function post(msg) {
-        if (!port) return;
+            // Safety stop (avoid infinite loop if user opens directly)
+            if (attempt > 60 && !resolved) {
+              clearInterval(timer);
+              reject(
+                new Error(
+                  "UEF MessagePort not acquired. Make sure launch is happening inside Learn (Ultra) and UEF is enabled."
+                )
+              );
+            }
+          }, 2000);
+
+          // If promise resolves/rejects, stop the timer
+          const stop = () => clearInterval(timer);
+          channel.port1.addEventListener("message", stop, { once: true });
+        });
+      }
+
+      /************************************************************
+       * Send wrappers
+       ************************************************************/
+      function send(port, msg) {
         port.postMessage(msg);
       }
 
-      function authorizeAndRegister() {
-        // 2) Authorize (YOU send this; Ultra expects it) :contentReference[oaicite:10]{index=10}
-        post({
-          type: "authorization:authorize",
-          token: REST_TOKEN
-        });
+      /************************************************************
+       * Main
+       ************************************************************/
+      (async function main() {
+        try {
+          log("LEARN_HOST =", LEARN_HOST);
+          log("TOOL_BASE_URL =", TOOL_BASE_URL);
 
-        console.log("➡️ Sent authorization:authorize");
-
-        // 3) Subscribe to portal events (needed to render Course Details portal) :contentReference[oaicite:11]{index=11}
-        post({
-          type: "event:subscribe",
-          subscriptions: ["portal-new", "portal-remove"]
-        });
-
-        console.log("➡️ Subscribed to portal events");
-
-        // 4) Register a Course Details integration :contentReference[oaicite:12]{index=12}
-        post({
-          type: "course:detail:register",
-          registrationName: PORTAL_TITLE
-        });
-
-        console.log("➡️ Sent course:detail:register");
-      }
-
-      function onPortMessage(evt) {
-        const data = evt.data;
-        if (!data || typeof data !== "object") return;
-
-        // Portal events come as { type: 'event:event', portalId, eventType, ... } :contentReference[oaicite:13]{index=13}
-        if (data.type === "event:event" && data.portalId) {
-          if (data.eventType === "new") {
-            console.log("🧩 Portal NEW:", data.portalId, data);
-
-            // Render an iframe in that portal :contentReference[oaicite:14]{index=14}
-            post({
-              type: "portal:render",
-              portalId: data.portalId,
-              contents: {
-                tag: "iframe",
-                props: {
-                  src: `${TOOL_BASE_URL}/chat.html`,
-                  style: {
-                    width: "100%",
-                    height: "520px",
-                    border: "0"
-                  }
-                }
-              }
-            });
-
-            console.log("✅ portal:render sent");
+          if (!REST_TOKEN || REST_TOKEN.startsWith("%%")) {
+            log("❌ Missing REST_TOKEN injection.");
+            return;
           }
-        }
-      }
 
-      // Keep trying until Ultra responds with a port (no infinite spam)
-      let tries = 0;
-      const t = setInterval(() => {
-        tries++;
-        requestPort();
-        if (port || tries > 15) clearInterval(t);
-        console.log(`Knocking... (${tries})`);
-      }, 1200);
+          if (!LTI_PLACEMENT_HANDLE || LTI_PLACEMENT_HANDLE.startsWith("%%")) {
+            log(
+              "⚠️ LTI_PLACEMENT_HANDLE is not set. Course link will register, but launch may not work."
+            );
+          }
+
+          // 1) Get UEF MessagePort
+          const port = await acquireMessagePort();
+
+          // Optional: print everything Learn sends us
+          port.onmessage = (event) => {
+            const data = event.data;
+            if (!data) return;
+            // Filter noisy heartbeats if any
+            if (data.type === "integration:hello") return;
+            log("📩 Message from Learn:", data);
+          };
+
+          // 2) Authorize UEF actions (needs bearer token)
+          log("➡️ Sent authorization:authorize");
+          send(port, {
+            type: "authorization:authorize",
+            payload: {
+              token: REST_TOKEN,
+
+              // If your environment enforces scopes strictly, you may need
+              // portal/help scopes for the features below.
+              // (Keep as-is unless your Learn rejects authorization.)
+              auth_types: ["ultra:portal", "ultra:help"],
+            },
+          });
+
+          // 3) (Optional) Register Help Provider item
+          // If you don’t want it, you can delete this block.
+          log("➡️ Sent integration:help:register");
+          send(port, {
+            type: "integration:help:register",
+            payload: {
+              id: HELP_ID,
+              title: PORTAL_TITLE || "NoodleFactory Chat",
+              url: `${TOOL_BASE_URL}/chat`,
+            },
+          });
+
+          // 4) Register Course Details & Actions link (shows inside a course)
+          log("➡️ Sent course:detail:register");
+          send(port, {
+            type: "course:detail:register",
+            payload: {
+              id: COURSE_DETAIL_ID,
+              title: PORTAL_TITLE || "Mappy Widget",
+              // Blackboard uses the placement handle to know which LTI placement to launch
+              handle: LTI_PLACEMENT_HANDLE,
+            },
+          });
+
+          log("✅ Done: waiting for Learn events...");
+        } catch (e) {
+          log("❌ ERROR:", e?.message || String(e));
+        }
+      })();
     </script>
   </body>
 </html>
