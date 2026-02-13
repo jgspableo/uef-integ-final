@@ -1,42 +1,30 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>NoodleFactory Chat</title>
     <style>
-      body,
-      html {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        overflow: hidden;
-      }
-      #sw-widget {
+      html, body { height: 100%; margin: 0; }
+      body { background: #000; }
+      iframe {
+        border: 0;
         width: 100%;
         height: 100%;
+        display: block;
       }
     </style>
   </head>
   <body>
-    <!--Start of NoodleFactory.ai Widget Script-->
-    <script type="text/javascript">
-      var $_Widget = $_Widget || {},
-        $_NFW = $_NFW || {};
-      (function () {
-        var s1 = document.createElement("script"),
-          s0 = document.getElementsByTagName("script")[0];
-        s1.async = true;
-        s1.src =
-          "https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js";
-        s1.charset = "UTF-8";
-        s1.setAttribute("crossorigin", "*");
-        s1.setAttribute("id", "sw-widget");
-        s1.onload = function () {
-          $_NFW.initialize();
-        };
-        s0.parentNode.insertBefore(s1, s0);
-      })();
-    </script>
-    <!--End of NoodleFactory.ai Widget Script-->
+    <!--
+      This iframe loads your hosted widget site.
+      If your hosted site already has the floating bubble logic (lower-right),
+      you'll see that same behavior inside this panel iframe.
+    -->
+    <iframe
+      src="%%NF_WIDGET_SRC%%"
+      allow="clipboard-read; clipboard-write;"
+      referrerpolicy="no-referrer-when-downgrade"
+    ></iframe>
   </body>
 </html>

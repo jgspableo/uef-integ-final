@@ -1,133 +1,240 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>UEF Bootstrap</title>
     <style>
+      html, body { height: 100%; margin: 0; }
       body {
-        font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-        margin: 24px;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+        background: #0b0b0c;
+        color: #e8e8ea;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
       }
       .card {
-        max-width: 980px;
-        padding: 18px;
-        border: 1px solid #ddd;
-        border-radius: 10px;
+        width: min(920px, 100%);
+        background: #141416;
+        border: 1px solid #2a2a2e;
+        border-radius: 14px;
+        padding: 18px 18px 14px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35);
       }
-      pre {
-        background: #0b0b0b;
-        color: #9cff9c;
-        padding: 14px;
-        border-radius: 10px;
+      .title { font-size: 18px; font-weight: 650; margin: 0 0 8px; }
+      .muted { opacity: .82; font-size: 13px; line-height: 1.45; margin: 0 0 10px; }
+      .row { font-size: 12px; opacity: .9; line-height: 1.6; }
+      code { background: #101012; padding: 2px 6px; border-radius: 8px; border: 1px solid #2a2a2e; }
+      .log {
+        margin-top: 12px;
+        padding: 10px;
+        background: #0f0f11;
+        border: 1px solid #2a2a2e;
+        border-radius: 12px;
+        height: 280px;
         overflow: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+        font-size: 12px;
+        white-space: pre-wrap;
       }
-      .warn { color: #ffcc66; }
-      .ok { color: #9cff9c; }
     </style>
   </head>
 
   <body>
     <div class="card">
-      <h2>UEF bootstrap loaded</h2>
-      <p>
-        This page should be launched from Learn (inside an iframe). If you open it directly,
-        UEF messages won’t connect.
+      <p class="title">UEF bootstrap running…</p>
+      <p class="muted">
+        This page is launched by Learn (UEF mode). It establishes a MessageChannel tunnel, then registers
+        a <b>Help Provider</b>. When the user clicks it, we open a panel and render the NF widget inside.
       </p>
 
-      <pre id="log"></pre>
+      <div class="row">LEARN_HOST: <code>%%LEARN_HOST%%</code></div>
+      <div class="row">TOOL_BASE_URL: <code>%%TOOL_BASE_URL%%</code></div>
+      <div class="row">CHAT_LAUNCH_URL: <code>%%CHAT_LAUNCH_URL%%</code></div>
+      <div class="row">PORTAL_TITLE: <code>%%PORTAL_TITLE%%</code></div>
+
+      <div id="log" class="log"></div>
     </div>
 
     <script>
-      const LEARN_HOST = "%%LEARN_HOST%%";
-      const TOOL_BASE_URL = "%%TOOL_BASE_URL%%";
-      const PORTAL_TITLE = "%%PORTAL_TITLE%%";
-      const REST_TOKEN = "%%REST_TOKEN%%";
-      const LTI_PLACEMENT_HANDLE = "%%LTI_PLACEMENT_HANDLE%%";
-      const CHAT_LAUNCH_URL = "%%CHAT_LAUNCH_URL%%";
+      // Injected by server.js template vars:
+      window.__LEARN_HOST = "%%LEARN_HOST%%";
+      window.__TOOL_BASE_URL = "%%TOOL_BASE_URL%%";
+      window.__CHAT_LAUNCH_URL = "%%CHAT_LAUNCH_URL%%";
+      window.__PORTAL_TITLE = "%%PORTAL_TITLE%%";
+      window.__REST_TOKEN = "%%REST_TOKEN%%"; // bearer token (REST) passed to auth step
+      window.__LTI_PLACEMENT_HANDLE = "%%LTI_PLACEMENT_HANDLE%%";
+    </script>
 
+    <script>
       const logEl = document.getElementById("log");
+
       function log(line) {
         logEl.textContent += line + "\n";
-        console.log(line);
+        logEl.scrollTop = logEl.scrollHeight;
       }
 
-      log("UEF bootstrap loaded");
-      log(`LEARN_HOST = ${LEARN_HOST}`);
-      log(`TOOL_BASE_URL = ${TOOL_BASE_URL}`);
-      if (!LTI_PLACEMENT_HANDLE || LTI_PLACEMENT_HANDLE === "%%LTI_PLACEMENT_HANDLE%%") {
-        log("⚠️ LTI_PLACEMENT_HANDLE is not set (optional).");
-      } else {
-        log(`LTI_PLACEMENT_HANDLE = ${LTI_PLACEMENT_HANDLE}`);
+      function safeJson(x) {
+        try { return JSON.stringify(x); } catch { return String(x); }
       }
 
-      let port = null;
-      let attempts = 0;
-      let helloTimer = null;
+      let messagePort = null;
+      let currentPanelPortalId = null;
 
-      // Listen for the initial MessagePort handoff.
-      window.addEventListener("message", (event) => {
-        const data = event.data;
+      // Receive the initial UEF handshake (should include a MessagePort)
+      window.addEventListener("message", (evt) => {
+        if (!evt?.data?.type) return;
 
-        // Some Learn builds used integration-hello, others integration:hello; accept both.
-        if (data?.type !== "integration:hello" && data?.type !== "integration-hello") return;
+        if (evt.data.type === "integration:hello") {
+          if (!evt.ports || !evt.ports[0]) {
+            log("[ERR] integration:hello response missing MessagePort");
+            return;
+          }
 
-        const maybePort = event.ports && event.ports[0];
-        if (!maybePort) {
-          log("⚠️ integration hello received but no MessagePort attached.");
+          messagePort = evt.ports[0];
+          messagePort.onmessage = onPortMessage;
+
+          log("[OK] MessageChannel established");
+
+          // Authorize (token → Ultra bridge). Your environment may respond with authorization:authorize:response.
+          post({
+            type: "authorization:authorize",
+            token: window.__REST_TOKEN,
+          });
+
+          // Register help provider after auth succeeds (some envs let you register immediately;
+          // doing it after auth is safer).
+          // We'll also retry registration if we never get an auth response within a short time.
+          setTimeout(() => {
+            if (!window.__didRegisterHelp) {
+              log("[WARN] No auth response yet; attempting help provider registration anyway…");
+              registerHelpProvider();
+            }
+          }, 2500);
+        }
+      });
+
+      function post(msg) {
+        if (!messagePort) return;
+        log("→ " + safeJson(msg));
+        messagePort.postMessage(msg);
+      }
+
+      function onPortMessage(evt) {
+        const data = evt?.data || {};
+        log("← " + safeJson(data));
+
+        // If your Learn tenant sends an auth response:
+        if (data.type === "authorization:authorize:response") {
+          if (data.status === "success") {
+            log("[OK] Authorized to UEF");
+            registerHelpProvider();
+          } else {
+            log("[ERR] Authorization failed: " + (data.error || data.status || "unknown"));
+            // Still attempt help provider registration (some tenants behave differently)
+            registerHelpProvider();
+          }
           return;
         }
 
-        if (port) return; // already have it
-        port = maybePort;
-        port.onmessage = onPortMessage;
-        port.start();
+        // Help clicked (this is a common pattern used by UEF help providers)
+        if (data.type === "help:request") {
+          log("[OK] Help requested → opening panel…");
+          // Acknowledge
+          post({
+            type: "help:request:response",
+            correlationId: data.correlationId,
+          });
+          openPanel();
+          return;
+        }
 
-        log("✅ UEF MessagePort acquired");
-        if (helloTimer) clearInterval(helloTimer);
+        // Panel open response
+        if (data.type === "portal:panel:response") {
+          if (data.status !== "success") {
+            log("[ERR] portal:panel:response failed: " + (data.error || data.status || "unknown"));
+            return;
+          }
+          currentPanelPortalId = data.portalId;
+          log("[OK] Panel opened portalId=" + currentPanelPortalId);
+          renderChat(currentPanelPortalId);
+          return;
+        }
 
-        // Authorize (REST token)
-        port.postMessage({
-          type: "authorization:authorize",
-          payload: { token: REST_TOKEN },
-        });
-        log("➡️ Sent authorization:authorize");
-
-        // Subscribe to portal events (optional)
-        port.postMessage({ type: "portal:events:subscribe" });
-        log("➡️ Subscribed to portal events");
-
-        // Register help entry (this is the most reliable “visible” UEF surface)
-        port.postMessage({
-          type: "integration:help:register",
-          payload: {
-            id: "noodle-factory-chat",
-            title: PORTAL_TITLE,
-            url: CHAT_LAUNCH_URL,
-          },
-        });
-        log("➡️ Sent integration:help:register (opens widget)");
-      });
-
-      function onPortMessage(evt) {
-        const data = evt.data;
-        log(`⬅️ PORT MSG: ${JSON.stringify(data)}`);
-
-        // Some systems respond after authorization
-        if (data?.type === "authorization:authorized") {
-          log("✅ Authorized with Learn");
+        // Panel callback (close)
+        if (data.type === "portal:callback" && data.event === "onClose") {
+          log("[..] Panel closed");
+          currentPanelPortalId = null;
+          return;
         }
       }
 
-      // Keep knocking until Learn hands us a MessagePort
-      helloTimer = setInterval(() => {
-        attempts++;
-        if (attempts === 1 || attempts % 5 === 0) {
-          log(`👋 Knocking... (Attempt ${attempts})`);
+      function registerHelpProvider() {
+        if (window.__didRegisterHelp) return;
+        window.__didRegisterHelp = true;
+
+        // Help provider registration (documented pattern + message type names used in UEF examples)
+        post({
+          type: "help:register",
+          id: "mapua-nf-mappy-help",
+          providerType: "auxiliary",
+          displayName: window.__PORTAL_TITLE || "Mapúa Chat",
+          iconUrl: window.__TOOL_BASE_URL + "/icon.png",
+        });
+
+        log("[OK] Help provider registered (auxiliary)");
+      }
+
+      function openPanel() {
+        if (currentPanelPortalId) {
+          log("[WARN] Panel already open → re-render");
+          renderChat(currentPanelPortalId);
+          return;
         }
-        window.parent.postMessage({ type: "integration:hello" }, "*");
-        window.parent.postMessage({ type: "integration-hello" }, "*");
-      }, 2000);
+
+        post({
+          type: "portal:panel",
+          correlationId: "nf-chat-panel-" + Date.now(),
+          panelType: "small",
+          panelTitle: window.__PORTAL_TITLE || "Mapúa Chat",
+          attributes: {
+            onClose: { callbackId: "nf-chat-close" },
+          },
+        });
+      }
+
+      function renderChat(portalId) {
+        post({
+          type: "portal:render",
+          portalId,
+          contents: {
+            tag: "iframe",
+            props: {
+              src: window.__CHAT_LAUNCH_URL,
+              style: {
+                border: "none",
+                width: "100%",
+                height: "100%",
+                display: "block",
+              },
+              allow: "clipboard-read; clipboard-write;",
+            },
+          },
+        });
+        log("[OK] Rendered chat iframe inside panel");
+      }
+
+      // Start handshake with Ultra parent
+      (function start() {
+        if (!window.__LEARN_HOST) {
+          log("[ERR] Missing LEARN_HOST template var");
+          return;
+        }
+        log("[..] Sending integration:hello to " + window.__LEARN_HOST);
+        window.parent.postMessage({ type: "integration:hello" }, window.__LEARN_HOST + "/*");
+      })();
     </script>
   </body>
 </html>

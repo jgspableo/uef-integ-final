@@ -25,7 +25,6 @@ const CLIENT_ID = must("CLIENT_ID");
 const PLATFORM_OIDC_AUTH_ENDPOINT = must("PLATFORM_OIDC_AUTH_ENDPOINT");
 const PLATFORM_ISSUER = must("PLATFORM_ISSUER");
 const PLATFORM_JWKS_URL = must("PLATFORM_JWKS_URL");
-
 const REDIRECT_URI = must("REDIRECT_URI"); // must match exactly what you registered
 
 // NF widget
@@ -42,10 +41,9 @@ const LTI_PLACEMENT_HANDLE = process.env.LTI_PLACEMENT_HANDLE || "";
 // Remote JWKS fetcher for platform signature verification
 const PLATFORM_JWKS = createRemoteJWKSet(new URL(PLATFORM_JWKS_URL));
 
-// OIDC state store (in-memory). For production, use Redis or DB.
+// OIDC state store (in-memory). For production, use Redis/DB.
 const stateStore = new Map();
 const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
 setInterval(() => {
   const now = Date.now();
   for (const [state, rec] of stateStore.entries()) {
@@ -74,9 +72,9 @@ app.get("/", (req, res) => {
 app.get("/jwks.json", (req, res) => {
   const jwksPath = path.join(__dirname, "public", "jwks.json");
   if (!fs.existsSync(jwksPath)) {
-    return res
-      .status(500)
-      .json({ error: "jwks.json not found. Generate it and redeploy." });
+    return res.status(500).json({
+      error: "jwks.json not found. Generate it and redeploy.",
+    });
   }
   res.sendFile(jwksPath);
 });
@@ -132,7 +130,7 @@ app.all("/launch", async (req, res) => {
 
     // Allow GET for manual debugging
     if (method === "GET") {
-      // If you open /launch directly in browser, just show chat (no LTI context)
+      // If you open /launch directly in browser, show a selected mode (defaults to chat)
       const mode = req.query.mode || "chat";
       return serveMode({ mode, req, res, restToken: "" });
     }
@@ -167,10 +165,6 @@ app.all("/launch", async (req, res) => {
       // ignore parse errors
     }
 
-    // If you want to force UEF mode for specific placement target_link_uri, use mode=uef
-    // Example placement URL: https://uef-integ-final.onrender.com/launch?mode=uef
-    // Example placement URL: https://uef-integ-final.onrender.com/launch?mode=chat
-
     // REST token only needed for UEF scenario
     let restToken = "";
     if (mode === "uef") {
@@ -198,7 +192,6 @@ function serveMode({ mode, req, res, restToken }) {
       // Use LTI launch again for opening the widget (so it always works inside Learn)
       CHAT_LAUNCH_URL: `${TOOL_BASE_URL}/launch?mode=chat`,
     });
-
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return res.send(html);
   }
@@ -225,7 +218,6 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => console.log(`Server running on :${port}`));
 
 /* ---------------- helpers ---------------- */
-
 function must(key) {
   const v = process.env[key];
   if (!v) throw new Error(`Missing env var: ${key}`);
@@ -240,8 +232,9 @@ function renderTemplate(filePath, vars) {
   return html;
 }
 
+// IMPORTANT: this must be a REAL HTML escape (your old version was broken)
 function escapeHtml(str) {
-  return str
+  return String(str)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
