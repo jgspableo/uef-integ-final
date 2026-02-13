@@ -2,32 +2,25 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>UEF Controller</title>
+    <title>UEF Debugger</title>
 </head>
 <body>
     <script>
-        console.log("🚀 UEF Controller Started.");
+        console.log("🕵️ UEF Debugger Started.");
 
-        // 1. Setup a "Persistent Handshake"
-        // We will send "Hello" every 1 second until Blackboard answers.
-        var attempts = 0;
-        var handshakeInterval = setInterval(function() {
-            attempts++;
-            console.log("👋 Sending Hello... (Attempt " + attempts + ")");
-            window.parent.postMessage({ type: "integration:hello" }, "*");
-        }, 1000);
-
-        // 2. Listen for the Answer
+        // 1. Log EVERYTHING Blackboard says
         window.addEventListener("message", function(event) {
+            // Filter out the noisy websocket messages from Blackboard itself
+            if (typeof event.data === 'string' && event.data.includes("server_heartbeat")) return;
+            
+            console.log("📨 RECEIVED MESSAGE from Parent:", event.data);
+
             var data = event.data;
-
-            // If Blackboard answers, STOP saying hello and proceed
             if (data.type === "integration:authorize") {
-                clearInterval(handshakeInterval); // Stop the loop
-                console.log("✅ UEF Authorized! (It took " + attempts + " attempts)");
-
-                // 3. Register the Help Item
-                var registerHelpCommand = {
+                console.log("✅ SUCCESS! Authorized.");
+                
+                // Send the help item command immediately
+                 var registerHelpCommand = {
                     type: "integration:help:register",
                     payload: {
                         id: "noodle-factory-chat",
@@ -35,11 +28,20 @@
                         url: "https://uef-integ-final.onrender.com/chat.html"
                     }
                 };
-
                 window.parent.postMessage(registerHelpCommand, "*");
-                console.log("📩 Help Item command sent.");
             }
         });
+
+        // 2. Persistent Handshake (Keep knocking until they answer)
+        var attempts = 0;
+        setInterval(function() {
+            attempts++;
+            // Only log every 5th attempt to keep console clean
+            if (attempts % 5 === 0 || attempts === 1) {
+                console.log("👋 Knocking on Blackboard's door... (Attempt " + attempts + ")");
+            }
+            window.parent.postMessage({ type: "integration:hello" }, "*");
+        }, 2000); // Slowed down to 2 seconds to be polite
     </script>
 </body>
 </html>
