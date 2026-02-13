@@ -6,20 +6,20 @@
 </head>
 <body>
     <script>
-        console.log("🕵️ UEF Debugger Started.");
+        console.log("🕵️ UEF Debugger Running.");
 
-        // 1. Log EVERYTHING Blackboard says
+        // 1. Listen for REAL answers only
         window.addEventListener("message", function(event) {
-            // Filter out the noisy websocket messages from Blackboard itself
-            if (typeof event.data === 'string' && event.data.includes("server_heartbeat")) return;
-            
-            console.log("📨 RECEIVED MESSAGE from Parent:", event.data);
-
             var data = event.data;
+            
+            // IGNORE our own echoes and Blackboard heartbeats
+            if (data.type === "integration:hello") return; 
+            if (typeof data === 'string') return;
+
+            console.log("📨 REAL MESSAGE:", data);
+
             if (data.type === "integration:authorize") {
                 console.log("✅ SUCCESS! Authorized.");
-                
-                // Send the help item command immediately
                  var registerHelpCommand = {
                     type: "integration:help:register",
                     payload: {
@@ -32,16 +32,15 @@
             }
         });
 
-        // 2. Persistent Handshake (Keep knocking until they answer)
+        // 2. Persistent Handshake
         var attempts = 0;
         setInterval(function() {
             attempts++;
-            // Only log every 5th attempt to keep console clean
             if (attempts % 5 === 0 || attempts === 1) {
-                console.log("👋 Knocking on Blackboard's door... (Attempt " + attempts + ")");
+                console.log("👋 Knocking... (Attempt " + attempts + ")");
             }
             window.parent.postMessage({ type: "integration:hello" }, "*");
-        }, 2000); // Slowed down to 2 seconds to be polite
+        }, 2000);
     </script>
 </body>
 </html>
