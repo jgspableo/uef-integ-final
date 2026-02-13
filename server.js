@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import { fileURLToPath } from "url";
 import fs from "fs";
 import crypto from "crypto";
 import dotenv from "dotenv";
@@ -10,7 +11,7 @@ const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const TOOL_BASE_URL = must("TOOL_BASE_URL");
 const LEARN_HOST = must("LEARN_HOST");
@@ -73,6 +74,14 @@ app.all("/launch", async (req, res) => {
     console.error("Launch failed:", e);
     res.status(500).send("Launch failed: " + (e?.message || String(e)));
   }
+});
+
+app.get("/chat", (req, res) => {
+  const html = renderTemplate(path.join(__dirname, "public", "chat.html"), {
+    NF_WIDGET_SRC: must("NF_WIDGET_SRC"),
+  });
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(html);
 });
 
 // Start
