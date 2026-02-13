@@ -8,10 +8,10 @@ const HOST = "0.0.0.0";
 
 /**
  * ENV you should set in Render:
- * - NF_WIDGET_ID = A60CF5EFD2705979  (your widget id)
+ * - NF_WIDGET_ID = (your widget id)
  *
  * Optional overrides:
- * - NF_WIDGET_SCRIPT_URL = full widget.js URL if you prefer (otherwise computed from ID)
+ * - NF_WIDGET_SCRIPT_URL = full widget.js URL if you prefer
  */
 const NF_WIDGET_ID = (process.env.NF_WIDGET_ID || "").trim();
 const NF_WIDGET_SCRIPT_URL = (process.env.NF_WIDGET_SCRIPT_URL || "").trim();
@@ -22,7 +22,7 @@ function getNfWidgetScriptUrl() {
   return `https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/${NF_WIDGET_ID}/widget.js`;
 }
 
-// Basic hardening + make debugging easier
+// Basic hardening
 app.disable("x-powered-by");
 
 app.use((req, res, next) => {
@@ -34,7 +34,7 @@ app.use((req, res, next) => {
 // Serve static test page
 app.use(express.static("public", { extensions: ["html"] }));
 
-// Health endpoint (Render likes having something to hit)
+// Health endpoint
 app.get("/health", (req, res) => {
   res.json({ ok: true, uptime: process.uptime() });
 });
@@ -74,58 +74,24 @@ app.get("/uef.js", (req, res) => {
     window.$_NFW = window.$_NFW || {};
 
     // ---------------------------------------------------------
-    // STRATEGY A: NICE CSS INJECTION
-    // (Tries to override styles globally via a style tag)
-    // ---------------------------------------------------------
-    function injectStyles() {
-      var css = \`
-        /* Force wrapper visibility */
-        .noodle-factory-widget-wrapper {
-            overflow: visible !important;
-            height: auto !important; 
-            width: auto !important;
-            z-index: 2147483647 !important;
-            position: fixed !important;
-            bottom: 20px !important;
-            right: 20px !important;
-        }
-        /* Force button visibility */
-        .noodle-factory-button-wrapper {
-            width: 60px !important;
-            height: 60px !important;
-            display: block !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-        }
-        /* Force iframe visibility */
-        .noodle-factory-widget iframe {
-            min-width: 60px !important;
-            min-height: 60px !important;
-        }
-      \`;
-      var style = document.createElement('style');
-      style.id = 'uef-nf-css-overrides';
-      style.appendChild(document.createTextNode(css));
-      document.head.appendChild(style);
-      console.log("[UEF] Injected CSS overrides.");
-    }
-
-    // ---------------------------------------------------------
-    // STRATEGY B: THE NUCLEAR OPTION (Aggressive JS)
-    // (Repeatedly forces inline styles to fight the widget's internal resets)
+    // THE NUCLEAR OPTION: "MOVE IT & PROVE IT" VERSION
     // ---------------------------------------------------------
     function forceStyles() {
       // 1. Fix the Outer Wrapper
       var wrapper = document.querySelector('.noodle-factory-widget-wrapper');
       if (wrapper) {
-        // We use setProperty with 'important' to beat inline styles
+        // Force visibility
         wrapper.style.setProperty('overflow', 'visible', 'important');
         wrapper.style.setProperty('height', 'auto', 'important');
         wrapper.style.setProperty('width', 'auto', 'important');
         wrapper.style.setProperty('z-index', '2147483647', 'important');
+        
+        // --- DEBUG POSITIONING ---
+        // We float it high and to the left to avoid the "Help" button (? icon)
         wrapper.style.setProperty('position', 'fixed', 'important');
-        wrapper.style.setProperty('bottom', '0px', 'important');
-        wrapper.style.setProperty('right', '0px', 'important');
+        wrapper.style.setProperty('bottom', '200px', 'important'); 
+        wrapper.style.setProperty('right', '100px', 'important');
+        // -------------------------
       }
 
       // 2. Fix the Button (The Launcher)
@@ -136,27 +102,28 @@ app.get("/uef.js", (req, res) => {
         btn.style.setProperty('display', 'block', 'important');
         btn.style.setProperty('visibility', 'visible', 'important');
         btn.style.setProperty('opacity', '1', 'important');
+        
+        // --- DEBUG BORDER ---
+        // Red border to make it impossible to miss
+        btn.style.setProperty('border', '5px solid red', 'important');
       }
       
-      // 3. Fix the Chat Window (If it's open)
+      // 3. Fix the Chat Window (If open)
       var chat = document.querySelector('.noodle-factory-chat-wrapper');
       if (chat) {
-         // Ensure it sits on top of everything else
          chat.style.setProperty('z-index', '2147483648', 'important');
       }
     }
 
-    // Run the enforcer immediately
+    // Run immediately
     forceStyles();
-    // And run it every 500ms to fight any "height: 0px" updates from the widget itself
+    // Run every 500ms to fight the widget trying to hide itself
     setInterval(forceStyles, 500);
-
 
     // ---------------------------------------------------------
     // SCRIPT INJECTION LOGIC
     // ---------------------------------------------------------
     function inject() {
-      // If script already exists, just try to initialize
       if (document.getElementById("sw-widget")) {
         if (window.$_NFW && typeof window.$_NFW.initialize === "function") {
           window.$_NFW.initialize();
@@ -186,27 +153,24 @@ app.get("/uef.js", (req, res) => {
     }
 
     // Execute logic
-    injectStyles();
     inject();
 
-    // Re-check on load (sometimes Ultra modifies DOM late)
+    // Re-check on load 
     window.addEventListener("load", inject, { once: true });
 
     // Watch for DOM changes (SPA navigation)
-    // We observe body instead of documentElement to save CPU
-    var mo = new MutationObserver(function () {
+    varVP_OBSERVER = new MutationObserver(function () {
       if (!document.getElementById("sw-widget")) {
         console.log("[UEF] Widget removed by navigation, re-injecting...");
         inject();
-        injectStyles();
       }
-      // Also run style force on every DOM change just in case
+      // Keep enforcing styles on every DOM change
       forceStyles();
     });
 
     var startObserver = function() {
         if (document.body) {
-            mo.observe(document.body, { childList: true, subtree: true });
+            varVP_OBSERVER.observe(document.body, { childList: true, subtree: true });
         } else {
             setTimeout(startObserver, 100);
         }
