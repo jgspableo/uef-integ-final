@@ -6,35 +6,40 @@
 </head>
 <body>
     <script>
-        // 1. Handshake with Blackboard
-        var myOrigin = window.location.origin; 
-        
-        console.log("🚀 UEF Controller Loaded. Sending Hello...");
-        window.parent.postMessage({ type: "integration:hello" }, "*");
+        console.log("🚀 UEF Controller Started.");
 
-        // 2. Wait for Authorization
+        // 1. Setup a "Persistent Handshake"
+        // We will send "Hello" every 1 second until Blackboard answers.
+        var attempts = 0;
+        var handshakeInterval = setInterval(function() {
+            attempts++;
+            console.log("👋 Sending Hello... (Attempt " + attempts + ")");
+            window.parent.postMessage({ type: "integration:hello" }, "*");
+        }, 1000);
+
+        // 2. Listen for the Answer
         window.addEventListener("message", function(event) {
             var data = event.data;
 
+            // If Blackboard answers, STOP saying hello and proceed
             if (data.type === "integration:authorize") {
-                console.log("✅ UEF Authorized! Registering Help Item...");
+                clearInterval(handshakeInterval); // Stop the loop
+                console.log("✅ UEF Authorized! (It took " + attempts + " attempts)");
 
-                // 3. Register a Help Item (The reliable way)
-                // This adds a link to the Blackboard Help Menu (?)
+                // 3. Register the Help Item
                 var registerHelpCommand = {
                     type: "integration:help:register",
                     payload: {
                         id: "noodle-factory-chat",
-                        title: "Chat with NoodleFactory AI", // Text in the menu
-                        url: "https://uef-integ-final.onrender.com/chat.html" // Opens the visible chat
+                        title: "Chat with NoodleFactory AI",
+                        url: "https://uef-integ-final.onrender.com/chat.html"
                     }
                 };
 
                 window.parent.postMessage(registerHelpCommand, "*");
-                console.log("📩 Help Item Registered. Check the '?' menu!");
+                console.log("📩 Help Item command sent.");
             }
         });
     </script>
 </body>
 </html>
-
