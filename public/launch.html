@@ -1,66 +1,36 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>UEF Widget Launch</title>
-
-    <style>
-      body {
-        font-family: sans-serif;
-        background: #f5f5f5;
-        text-align: center;
-        padding: 20px;
-      }
-      .status {
-        color: green;
-        font-weight: bold;
-      }
-    </style>
-  </head>
-  <body>
-    <h2>NoodleFactory Widget Loader</h2>
-    <p>Status: <span id="status">Initializing...</span></p>
-
+<head>
+    <meta charset="UTF-8">
+    <title>UEF Controller</title>
+</head>
+<body>
     <script>
-      // Notify Blackboard that the integration has loaded
-      window.parent.postMessage({ type: "integration:hello" }, "*");
+        // 1. Handshake with Blackboard
+        window.parent.postMessage({ type: "integration:hello" }, "*");
 
-      // Listen for Blackboard's authorization response
-      window.addEventListener("message", function (event) {
-        var data = event.data;
+        // 2. Wait for Authorization
+        window.addEventListener("message", function(event) {
+            var data = event.data;
 
-        // If Blackboard authorizes us, we are good to go
-        if (data.type === "integration:authorize") {
-          console.log("✅ UEF: Authorized by Blackboard!");
-          document.getElementById("status").innerText = "Authorized & Running";
-          document.getElementById("status").className = "status";
+            if (data.type === "integration:authorize") {
+                console.log("✅ UEF Authorized. Attempting to open panel...");
 
-          // You can add logic here to open a panel if needed
-          // Example: window.parent.postMessage({ type: "integration:open-panel" ... }, "*");
-        }
-      });
+                // 3. Command Blackboard to Open the Panel
+                // We point the panel URL to your new chat.html file
+                var panelCommand = {
+                    type: "integration:panel:open",
+                    payload: {
+                        type: "custom_panel",
+                        url: "https://uef-integ-final.onrender.com/chat.html", 
+                        title: "NoodleFactory AI",
+                        width: "small" // Options: small, medium, large
+                    }
+                };
+
+                window.parent.postMessage(panelCommand, "*");
+            }
+        });
     </script>
-
-    <script type="text/javascript">
-      console.log("🍜 NoodleFactory script is loading...");
-      var $_Widget = $_Widget || {},
-        $_NFW = $_NFW || {};
-      (function () {
-        var s1 = document.createElement("script"),
-          s0 = document.getElementsByTagName("script")[0];
-        s1.async = true;
-        s1.src =
-          "https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js";
-        s1.charset = "UTF-8";
-        s1.setAttribute("crossorigin", "*");
-        s1.setAttribute("id", "sw-widget");
-        s1.onload = function () {
-          $_NFW.initialize();
-          console.log("🍜 NoodleFactory initialized!");
-        };
-        s0.parentNode.insertBefore(s1, s0);
-      })();
-    </script>
-  </body>
+</body>
 </html>
