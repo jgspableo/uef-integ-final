@@ -42,7 +42,9 @@ app.get("/uef.js", (req, res) => {
     res
       .status(500)
       .type("application/javascript; charset=utf-8")
-      .send(`console.error("[UEF] Missing NF_WIDGET_ID or NF_WIDGET_SCRIPT_URL");`);
+      .send(
+        `console.error("[UEF] Missing NF_WIDGET_ID or NF_WIDGET_SCRIPT_URL");`
+      );
     return;
   }
 
@@ -264,6 +266,6 @@ app.get("/uef.js", (req, res) => {
 app.get("/", (req, res) => res.redirect("/widget-wrapper.html"));
 
 app.listen(PORT, HOST, () => {
-  console.log(\`Server listening on http://\${HOST}:\${PORT}\`);
+  console.log(`Server listening on http://\${HOST}:\${PORT}`);
   console.log("UEF loader: /uef.js");
 });
