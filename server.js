@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import fs from "fs";
 import crypto from "crypto";
 import dotenv from "dotenv";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 
 dotenv.config();
 
@@ -15,37 +16,45 @@ app.use(express.json());
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/* ---------------- REQUIRED ENV VARS ----------------
-   TOOL_BASE_URL = https://uef-integ-final.onrender.com
-   LEARN_HOST = https://mapua-test.blackboard.com   (must be the origin you iframe from)
-   REST_KEY / REST_SECRET = REST API integration key/secret
-   CLIENT_ID = LTI tool Client ID (UUID)
-   PLATFORM_OIDC_AUTH_ENDPOINT = the "OIDC auth request endpoint" shown in Learn tool details
-   REDIRECT_URI = https://uef-integ-final.onrender.com/launch
-   NF_WIDGET_SRC = your NF widget SDK URL (or whatever you inject into chat.html)
----------------------------------------------------- */
+/* ---------------- REQUIRED ENV VARS ---------------- */
+const TOOL_BASE_URL = must("TOOL_BASE_URL"); // e.g. https://uef-integ-final.onrender.com
+const LEARN_HOST = must("LEARN_HOST"); // e.g. https://mapua-test.blackboard.com
 
-const TOOL_BASE_URL = must("TOOL_BASE_URL");
-const LEARN_HOST = must("LEARN_HOST");
-const REST_KEY = must("REST_KEY");
-const REST_SECRET = must("REST_SECRET");
-
+// LTI platform values (from Blackboard/Anthology app details)
 const CLIENT_ID = must("CLIENT_ID");
 const PLATFORM_OIDC_AUTH_ENDPOINT = must("PLATFORM_OIDC_AUTH_ENDPOINT");
-const REDIRECT_URI = must("REDIRECT_URI");
+const PLATFORM_ISSUER = must("PLATFORM_ISSUER");
+const PLATFORM_JWKS_URL = must("PLATFORM_JWKS_URL");
 
+const REDIRECT_URI = must("REDIRECT_URI"); // must match exactly what you registered
+
+// NF widget
 const NF_WIDGET_SRC = must("NF_WIDGET_SRC");
 
+// Optional (UEF shim / REST token usage)
+const REST_KEY = process.env.REST_KEY || "";
+const REST_SECRET = process.env.REST_SECRET || "";
+
+// Optional (cosmetics / UEF registration)
 const PORTAL_TITLE = process.env.PORTAL_TITLE || "NoodleFactory Chat";
+const LTI_PLACEMENT_HANDLE = process.env.LTI_PLACEMENT_HANDLE || "";
 
-// OIDC state store (in-memory). For production, use a persistent store.
+// Remote JWKS fetcher for platform signature verification
+const PLATFORM_JWKS = createRemoteJWKSet(new URL(PLATFORM_JWKS_URL));
+
+// OIDC state store (in-memory). For production, use Redis or DB.
 const stateStore = new Map();
+const STATE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-/* ---------------- Security headers (iframe) ----------------
-   You MUST allow Blackboard to iframe your tool.
-*/
+setInterval(() => {
+  const now = Date.now();
+  for (const [state, rec] of stateStore.entries()) {
+    if (now - rec.createdAt > STATE_TTL_MS) stateStore.delete(state);
+  }
+}, 60 * 1000);
+
+/* ---------------- Security headers (iframe) ---------------- */
 app.use((req, res, next) => {
-  // include 'self' and the Learn host
   res.setHeader(
     "Content-Security-Policy",
     `frame-ancestors 'self' ${LEARN_HOST};`
@@ -58,28 +67,21 @@ app.use(express.static(path.join(__dirname, "public")));
 
 /* ---------------- Health ---------------- */
 app.get("/", (req, res) => {
-  res.send("OK: BB UEF NF Widget tool is running");
+  res.send("OK: BB LTI/UEF NF tool is running");
 });
 
-/* ---------------- JWKS ----------------
-   Tool JWKS URL (your public keyset) – Blackboard uses this to verify *your* signatures
-   if/when you sign things. Serve the generated jwks.json file.
-*/
+/* ---------------- JWKS (your tool public keyset) ---------------- */
 app.get("/jwks.json", (req, res) => {
   const jwksPath = path.join(__dirname, "public", "jwks.json");
   if (!fs.existsSync(jwksPath)) {
     return res
       .status(500)
-      .json({ error: "jwks.json not found. Generate it and deploy it." });
+      .json({ error: "jwks.json not found. Generate it and redeploy." });
   }
   res.sendFile(jwksPath);
 });
 
-/* ---------------- LTI 1.3 Login Initiation ----------------
-   Learn calls this URL first (GET) with iss/login_hint/target_link_uri (+ optional lti_message_hint)
-   Tool must redirect to PLATFORM_OIDC_AUTH_ENDPOINT with required params.
-   If lti_message_hint exists, echo it back unmodified. :contentReference[oaicite:3]{index=3}
-*/
+/* ---------------- LTI 1.3 Login Initiation ---------------- */
 app.get("/login", (req, res) => {
   const { iss, login_hint, target_link_uri, lti_message_hint } = req.query;
 
@@ -91,19 +93,16 @@ app.get("/login", (req, res) => {
       );
   }
 
-  // Create state + nonce
   const state = crypto.randomBytes(16).toString("hex");
   const nonce = crypto.randomBytes(16).toString("hex");
 
-  // Store what the platform wanted to launch
   stateStore.set(state, {
     nonce,
-    iss,
+    iss: String(iss),
     target_link_uri: String(target_link_uri),
     createdAt: Date.now(),
   });
 
-  // Build OIDC auth request
   const params = new URLSearchParams({
     scope: "openid",
     response_type: "id_token",
@@ -116,83 +115,103 @@ app.get("/login", (req, res) => {
     login_hint: String(login_hint),
   });
 
-  if (lti_message_hint) {
-    // must be forwarded unaltered
+  if (lti_message_hint)
     params.set("lti_message_hint", String(lti_message_hint));
-  }
 
   return res.redirect(`${PLATFORM_OIDC_AUTH_ENDPOINT}?${params.toString()}`);
 });
 
-/* ---------------- LTI 1.3 Redirect / Launch ----------------
-   After OIDC, Learn auto-submits a FORM POST to redirect_uri with:
-     - id_token (JWT)
-     - state
-   :contentReference[oaicite:4]{index=4}
-
-   We accept both GET and POST:
-   - POST: real LTI launch
-   - GET: manual debugging
-*/
+/* ---------------- LTI 1.3 Launch (redirect_uri) ---------------- */
 app.all("/launch", async (req, res) => {
   try {
     const method = req.method.toUpperCase();
 
-    // LTI form_post payload
+    // Real LTI launch is POST form_post
     const id_token = req.body?.id_token;
     const state = req.body?.state;
 
-    // Decide which page to show based on original target_link_uri
-    let target = null;
-    if (state && stateStore.has(state)) {
-      target = stateStore.get(state)?.target_link_uri || null;
-      // one-time use (optional)
-      stateStore.delete(state);
+    // Allow GET for manual debugging
+    if (method === "GET") {
+      // If you open /launch directly in browser, just show chat (no LTI context)
+      const mode = req.query.mode || "chat";
+      return serveMode({ mode, req, res, restToken: "" });
     }
 
-    // If this launch came from a Course Content Tool placement,
-    // the platform usually intended to open your “content” UI (chat).
-    // If Ultra Extension, you usually want the UEF shim (launch.html).
-    const looksLikeChatTarget =
-      target && (target.includes("/chat") || target.includes("chat.html"));
-
-    if (method === "POST" && !id_token) {
-      return res.status(400).send("Missing id_token in POST /launch");
+    if (!id_token || !state) {
+      return res.status(400).send("Missing id_token or state in POST /launch");
     }
 
-    if (looksLikeChatTarget) {
-      // Serve chat UI (widget page)
-      const html = renderTemplate(path.join(__dirname, "public", "chat.html"), {
-        NF_WIDGET_SRC,
-      });
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(html);
+    const stateRec = stateStore.get(state);
+    if (!stateRec) {
+      return res.status(400).send("Invalid/expired state");
     }
+    stateStore.delete(state);
 
-    // Default: serve the UEF shim page (launch.html)
-    // If you truly need REST token for UEF calls, fetch it here:
-    const restToken = await getLearnRestToken(
-      LEARN_HOST,
-      REST_KEY,
-      REST_SECRET
-    );
-
-    const html = renderTemplate(path.join(__dirname, "public", "launch.html"), {
-      LEARN_HOST,
-      REST_TOKEN: restToken,
-      TOOL_BASE_URL,
-      PORTAL_TITLE,
+    // Verify JWT signature + issuer + audience
+    const { payload } = await jwtVerify(id_token, PLATFORM_JWKS, {
+      issuer: PLATFORM_ISSUER,
+      audience: CLIENT_ID,
     });
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    return res.send(html);
+    // Verify nonce matches what we generated
+    if (!payload?.nonce || payload.nonce !== stateRec.nonce) {
+      return res.status(400).send("Nonce mismatch");
+    }
+
+    // Decide mode based on target_link_uri OR explicit mode param
+    let mode = "chat";
+    try {
+      const u = new URL(stateRec.target_link_uri);
+      mode = u.searchParams.get("mode") || "chat";
+    } catch {
+      // ignore parse errors
+    }
+
+    // If you want to force UEF mode for specific placement target_link_uri, use mode=uef
+    // Example placement URL: https://uef-integ-final.onrender.com/launch?mode=uef
+    // Example placement URL: https://uef-integ-final.onrender.com/launch?mode=chat
+
+    // REST token only needed for UEF scenario
+    let restToken = "";
+    if (mode === "uef") {
+      if (!REST_KEY || !REST_SECRET) {
+        throw new Error("UEF mode requires REST_KEY and REST_SECRET env vars.");
+      }
+      restToken = await getLearnRestToken(LEARN_HOST, REST_KEY, REST_SECRET);
+    }
+
+    return serveMode({ mode, req, res, restToken });
   } catch (e) {
     console.error("Launch failed:", e);
     res.status(500).send("Launch failed: " + (e?.message || String(e)));
   }
 });
 
-/* Optional: direct route to chat for manual testing (GET only) */
+function serveMode({ mode, req, res, restToken }) {
+  if (mode === "uef") {
+    const html = renderTemplate(path.join(__dirname, "public", "launch.html"), {
+      LEARN_HOST,
+      TOOL_BASE_URL,
+      PORTAL_TITLE,
+      REST_TOKEN: restToken,
+      LTI_PLACEMENT_HANDLE,
+      // Use LTI launch again for opening the widget (so it always works inside Learn)
+      CHAT_LAUNCH_URL: `${TOOL_BASE_URL}/launch?mode=chat`,
+    });
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.send(html);
+  }
+
+  // Default: show widget page
+  const html = renderTemplate(path.join(__dirname, "public", "chat.html"), {
+    NF_WIDGET_SRC,
+  });
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.send(html);
+}
+
+/* Optional direct route (debug only) */
 app.get("/chat", (req, res) => {
   const html = renderTemplate(path.join(__dirname, "public", "chat.html"), {
     NF_WIDGET_SRC,
@@ -231,8 +250,10 @@ function escapeHtml(str) {
 }
 
 /**
- * Get a Learn REST token using 2-legged OAuth (client_credentials).
- * Token endpoint: /learn/api/public/v1/oauth2/token :contentReference[oaicite:5]{index=5}
+ * Learn REST token (client_credentials):
+ * POST {learnHost}/learn/api/public/v1/oauth2/token
+ * Authorization: Basic base64(key:secret)
+ * body: grant_type=client_credentials
  */
 async function getLearnRestToken(learnHost, key, secret) {
   const tokenUrl = `${learnHost}/learn/api/public/v1/oauth2/token`;
