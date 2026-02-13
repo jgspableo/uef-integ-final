@@ -1,37 +1,46 @@
-//chat.html
-
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Chat Panel</title>
+  <head>
+    <meta charset="UTF-8" />
+    <title>NoodleFactory Chat</title>
     <style>
-        /* Force the widget to be visible in the panel */
-        body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; }
-        #sw-widget { width: 100% !important; height: 100% !important; }
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+      }
+      #sw-widget {
+        width: 100%;
+        height: 100%;
+      }
     </style>
-</head>
-<body>
-    <h3>NoodleFactory Chat</h3>
-    <p>The chat should appear below.</p>
+  </head>
+  <body>
+    <script>
+      // Optional: you can hardcode here, or inject similarly.
+      const NF_WIDGET_SRC = "%%NF_WIDGET_SRC%%";
+    </script>
 
     <script type="text/javascript">
-        var $_Widget = $_Widget || {},
-            $_NFW = $_NFW || {};
-        (function () {
-          var s1 = document.createElement("script"),
-              s0 = document.getElementsByTagName("script")[0];
-          s1.async = true;
-          s1.src =
-            "https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js";
-          s1.charset = "UTF-8";
-          s1.setAttribute("crossorigin", "*");
-          s1.setAttribute("id", "sw-widget");
-          s1.onload = function () {
+      var $_Widget = $_Widget || {};
+      $_NFW = $_NFW || {};
+      (function () {
+        var s1 = document.createElement("script"),
+          s0 = document.getElementsByTagName("script")[0];
+        s1.async = true;
+        s1.src = NF_WIDGET_SRC || "https://portalapi.noodlefactory.ai/api/v1/widget/widget-sdk/A60CF5EFD2705979/widget.js";
+        s1.charset = "UTF-8";
+        s1.setAttribute("crossorigin", "anonymous");
+        s1.setAttribute("id", "sw-widget");
+        s1.onload = function () {
+          if (window.$_NFW && typeof $_NFW.initialize === "function") {
             $_NFW.initialize();
-          };
-          s0.parentNode.insertBefore(s1, s0);
-        })();
-      </script>
-</body>
+          }
+        };
+        s0.parentNode.insertBefore(s1, s0);
+      })();
+    </script>
+  </body>
 </html>

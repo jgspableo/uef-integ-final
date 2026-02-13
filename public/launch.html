@@ -1,46 +1,114 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>UEF Debugger</title>
-</head>
-<body>
+  <head>
+    <meta charset="UTF-8" />
+    <title>UEF Bootstrap</title>
+  </head>
+  <body>
     <script>
-        console.log("🕵️ UEF Debugger Running.");
+      // Injected by server.js
+      const LEARN_HOST = "%%LEARN_HOST%%";
+      const REST_TOKEN = "%%REST_TOKEN%%";
+      const TOOL_BASE_URL = "%%TOOL_BASE_URL%%";
+      const PORTAL_TITLE = "%%PORTAL_TITLE%%";
 
-        // 1. Listen for REAL answers only
-        window.addEventListener("message", function(event) {
-            var data = event.data;
-            
-            // IGNORE our own echoes and Blackboard heartbeats
-            if (data.type === "integration:hello") return; 
-            if (typeof data === 'string') return;
+      console.log("UEF bootstrap loaded");
 
-            console.log("📨 REAL MESSAGE:", data);
+      // 1) Ask Ultra for a MessagePort (MessageChannel)
+      function requestPort() {
+        window.parent.postMessage(
+          { type: "integration:hello" },
+          LEARN_HOST
+        );
+      }
 
-            if (data.type === "integration:authorize") {
-                console.log("✅ SUCCESS! Authorized.");
-                 var registerHelpCommand = {
-                    type: "integration:help:register",
-                    payload: {
-                        id: "noodle-factory-chat",
-                        title: "Chat with NoodleFactory AI",
-                        url: "https://uef-integ-final.onrender.com/chat.html"
-                    }
-                };
-                window.parent.postMessage(registerHelpCommand, "*");
-            }
+      let port = null;
+
+      window.addEventListener("message", (event) => {
+        // Only accept from the Learn host
+        if (event.origin !== LEARN_HOST) return;
+
+        // Ultra will respond with a MessagePort in event.ports[0]
+        if (event.ports && event.ports.length > 0) {
+          port = event.ports[0];
+          console.log("✅ UEF MessagePort acquired");
+
+          port.onmessage = onPortMessage;
+
+          authorizeAndRegister();
+        }
+      });
+
+      function post(msg) {
+        if (!port) return;
+        port.postMessage(msg);
+      }
+
+      function authorizeAndRegister() {
+        // 2) Authorize (YOU send this; Ultra expects it) :contentReference[oaicite:10]{index=10}
+        post({
+          type: "authorization:authorize",
+          token: REST_TOKEN
         });
 
-        // 2. Persistent Handshake
-        var attempts = 0;
-        setInterval(function() {
-            attempts++;
-            if (attempts % 5 === 0 || attempts === 1) {
-                console.log("👋 Knocking... (Attempt " + attempts + ")");
-            }
-            window.parent.postMessage({ type: "integration:hello" }, "*");
-        }, 2000);
+        console.log("➡️ Sent authorization:authorize");
+
+        // 3) Subscribe to portal events (needed to render Course Details portal) :contentReference[oaicite:11]{index=11}
+        post({
+          type: "event:subscribe",
+          subscriptions: ["portal-new", "portal-remove"]
+        });
+
+        console.log("➡️ Subscribed to portal events");
+
+        // 4) Register a Course Details integration :contentReference[oaicite:12]{index=12}
+        post({
+          type: "course:detail:register",
+          registrationName: PORTAL_TITLE
+        });
+
+        console.log("➡️ Sent course:detail:register");
+      }
+
+      function onPortMessage(evt) {
+        const data = evt.data;
+        if (!data || typeof data !== "object") return;
+
+        // Portal events come as { type: 'event:event', portalId, eventType, ... } :contentReference[oaicite:13]{index=13}
+        if (data.type === "event:event" && data.portalId) {
+          if (data.eventType === "new") {
+            console.log("🧩 Portal NEW:", data.portalId, data);
+
+            // Render an iframe in that portal :contentReference[oaicite:14]{index=14}
+            post({
+              type: "portal:render",
+              portalId: data.portalId,
+              contents: {
+                tag: "iframe",
+                props: {
+                  src: `${TOOL_BASE_URL}/chat.html`,
+                  style: {
+                    width: "100%",
+                    height: "520px",
+                    border: "0"
+                  }
+                }
+              }
+            });
+
+            console.log("✅ portal:render sent");
+          }
+        }
+      }
+
+      // Keep trying until Ultra responds with a port (no infinite spam)
+      let tries = 0;
+      const t = setInterval(() => {
+        tries++;
+        requestPort();
+        if (port || tries > 15) clearInterval(t);
+        console.log(`Knocking... (${tries})`);
+      }, 1200);
     </script>
-</body>
+  </body>
 </html>
