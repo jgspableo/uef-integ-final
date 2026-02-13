@@ -1,12 +1,18 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>NoodleFactory Chat</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NF Widget Panel</title>
     <style>
-      html, body { height: 100%; margin: 0; }
-      body { background: #000; }
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        background: #000;
+      }
       iframe {
         border: 0;
         width: 100%;
@@ -16,15 +22,10 @@
     </style>
   </head>
   <body>
-    <!--
-      This iframe loads your hosted widget site.
-      If your hosted site already has the floating bubble logic (lower-right),
-      you'll see that same behavior inside this panel iframe.
-    -->
     <iframe
-      src="%%NF_WIDGET_SRC%%"
+      src="/widget-wrapper.html"
+      title="NF Widget"
       allow="clipboard-read; clipboard-write;"
-      referrerpolicy="no-referrer-when-downgrade"
     ></iframe>
   </body>
 </html>
