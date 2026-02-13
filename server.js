@@ -65,154 +65,65 @@ app.get("/uef.js", (req, res) => {
  */
 (function () {
   try {
-    // 1. Prevent double-loading
-    if (window.__NF_WIDGET_LOADED__) return;
-    window.__NF_WIDGET_LOADED__ = true;
-
-    // Globals expected by NF
-    window.$_Widget = window.$_Widget || {};
-    window.$_NFW = window.$_NFW || {};
-
-    // ---------------------------------------------------------
-    // STRATEGY A: NICE CSS INJECTION
-    // (Tries to override styles globally via a style tag)
-    // ---------------------------------------------------------
-    function injectStyles() {
-      var css = \`
-        /* Force wrapper visibility */
-        .noodle-factory-widget-wrapper {
-            overflow: visible !important;
-            height: auto !important; 
-            width: auto !important;
-            z-index: 2147483647 !important;
-            position: fixed !important;
-            bottom: 20px !important;
-            right: 20px !important;
-        }
-        /* Force button visibility */
-        .noodle-factory-button-wrapper {
-            width: 60px !important;
-            height: 60px !important;
-            display: block !important;
-            visibility: visible !important;
-            opacity: 1 !important;
-        }
-        /* Force iframe visibility */
-        .noodle-factory-widget iframe {
-            min-width: 60px !important;
-            min-height: 60px !important;
-        }
-      \`;
-      var style = document.createElement('style');
-      style.id = 'uef-nf-css-overrides';
-      style.appendChild(document.createTextNode(css));
-      document.head.appendChild(style);
-      console.log("[UEF] Injected CSS overrides.");
+    // Prefer the real Ultra window if we can access it (same-origin).
+    var topWin = window;
+    try {
+      if (window.top && window.top.document) topWin = window.top;
+    } catch (e) {
+      // cross-origin or sandboxed; fall back to current window
+      topWin = window;
     }
 
-    // ---------------------------------------------------------
-    // STRATEGY B: THE NUCLEAR OPTION (Aggressive JS)
-    // (Repeatedly forces inline styles to fight the widget's internal resets)
-    // ---------------------------------------------------------
-    function forceStyles() {
-      // 1. Fix the Outer Wrapper
-      var wrapper = document.querySelector('.noodle-factory-widget-wrapper');
-      if (wrapper) {
-        // We use setProperty with 'important' to beat inline styles
-        wrapper.style.setProperty('overflow', 'visible', 'important');
-        wrapper.style.setProperty('height', 'auto', 'important');
-        wrapper.style.setProperty('width', 'auto', 'important');
-        wrapper.style.setProperty('z-index', '2147483647', 'important');
-        wrapper.style.setProperty('position', 'fixed', 'important');
-        wrapper.style.setProperty('bottom', '0px', 'important');
-        wrapper.style.setProperty('right', '0px', 'important');
-      }
+    var doc = topWin.document;
 
-      // 2. Fix the Button (The Launcher)
-      var btn = document.querySelector('.noodle-factory-button-wrapper');
-      if (btn) {
-        btn.style.setProperty('width', '60px', 'important');
-        btn.style.setProperty('height', '60px', 'important');
-        btn.style.setProperty('display', 'block', 'important');
-        btn.style.setProperty('visibility', 'visible', 'important');
-        btn.style.setProperty('opacity', '1', 'important');
-      }
-      
-      // 3. Fix the Chat Window (If it's open)
-      var chat = document.querySelector('.noodle-factory-chat-wrapper');
-      if (chat) {
-         // Ensure it sits on top of everything else
-         chat.style.setProperty('z-index', '2147483648', 'important');
-      }
-    }
+    // Prevent double-loading across SPA navigations
+    if (topWin.__NF_WIDGET_LOADED__) return;
+    topWin.__NF_WIDGET_LOADED__ = true;
 
-    // Run the enforcer immediately
-    forceStyles();
-    // And run it every 500ms to fight any "height: 0px" updates from the widget itself
-    setInterval(forceStyles, 500);
+    // NF snippet expects these globals
+    topWin.$_Widget = topWin.$_Widget || {};
+    topWin.$_NFW = topWin.$_NFW || {};
 
-
-    // ---------------------------------------------------------
-    // SCRIPT INJECTION LOGIC
-    // ---------------------------------------------------------
     function inject() {
-      // If script already exists, just try to initialize
-      if (document.getElementById("sw-widget")) {
-        if (window.$_NFW && typeof window.$_NFW.initialize === "function") {
-          window.$_NFW.initialize();
+      // If script already exists, just try initialize
+      if (doc.getElementById("sw-widget")) {
+        if (topWin.$_NFW && typeof topWin.$_NFW.initialize === "function") {
+          topWin.$_NFW.initialize();
         }
         return;
       }
 
-      var s1 = document.createElement("script");
+      var s1 = doc.createElement("script");
       s1.async = true;
       s1.src = "${widgetUrl}";
       s1.charset = "UTF-8";
-      s1.setAttribute("crossorigin", "*");
-      s1.setAttribute("id", "sw-widget");
+
+      // Valid values are "anonymous" or "use-credentials"
+      s1.crossOrigin = "anonymous";
+
+      s1.id = "sw-widget";
       s1.onload = function () {
-        console.log("[UEF] Widget script loaded.");
         try {
-          if (window.$_NFW && typeof window.$_NFW.initialize === "function") {
-            window.$_NFW.initialize();
-            console.log("[UEF] $_NFW.initialize() called.");
+          if (topWin.$_NFW && typeof topWin.$_NFW.initialize === "function") {
+            topWin.$_NFW.initialize();
+          } else {
+            console.warn("[UEF] Widget script loaded but $_NFW.initialize not found yet.");
           }
         } catch (e) {
           console.error("[UEF] initialize() failed:", e);
         }
       };
 
-      (document.head || document.documentElement).appendChild(s1);
+      (doc.head || doc.documentElement).appendChild(s1);
+      console.log("[UEF] Injected NF widget script into top window.");
     }
 
-    // Execute logic
-    injectStyles();
     inject();
 
-    // Re-check on load (sometimes Ultra modifies DOM late)
-    window.addEventListener("load", inject, { once: true });
+    topWin.addEventListener("load", inject, { once: true });
 
-    // Watch for DOM changes (SPA navigation)
-    // We observe body instead of documentElement to save CPU
-    var mo = new MutationObserver(function () {
-      if (!document.getElementById("sw-widget")) {
-        console.log("[UEF] Widget removed by navigation, re-injecting...");
-        inject();
-        injectStyles();
-      }
-      // Also run style force on every DOM change just in case
-      forceStyles();
-    });
-
-    var startObserver = function() {
-        if (document.body) {
-            mo.observe(document.body, { childList: true, subtree: true });
-        } else {
-            setTimeout(startObserver, 100);
-        }
-    };
-    startObserver();
-
+    var mo = new topWin.MutationObserver(function () { inject(); });
+    mo.observe(doc.documentElement, { childList: true, subtree: true });
   } catch (err) {
     console.error("[UEF] loader crashed:", err);
   }
